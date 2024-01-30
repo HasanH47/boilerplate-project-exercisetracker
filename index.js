@@ -102,15 +102,20 @@ app.get("/api/users/:_id/logs", async (req, res) => {
 
     const fromDate = from ? new Date(from) : new Date(0);
     const toDate = to ? new Date(to) : new Date();
+
+    // Filter the log entries based on the date range
     const log = user.log.filter((exercise) => {
       const exerciseDate = new Date(exercise.date);
       return exerciseDate >= fromDate && exerciseDate <= toDate;
     });
 
+    // Apply the limit if specified
+    const limitedLog = limit ? log.slice(0, limit) : log;
+
     res.json({
       username: user.username,
-      count: user.log.length,
-      log: user.log.map((exercise) => ({
+      count: limitedLog.length,
+      log: limitedLog.map((exercise) => ({
         description: exercise.description,
         duration: exercise.duration,
         date: exercise.date.toDateString(),
