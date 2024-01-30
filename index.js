@@ -86,6 +86,7 @@ app.post("/api/users/:_id/exercises", async (req, res) => {
       date: exercise.date.toDateString(),
     });
   } catch (error) {
+    console.error(error);
     res.status(500).json({ error: "Internal Server Error" });
   }
 });
@@ -96,27 +97,26 @@ app.get("/api/users/:_id/logs", async (req, res) => {
     const user = await User.findById(_id);
     if (!user) return res.status(404).json({ error: "User not found" });
 
-    let { from, to, limit } = req.query;
+    const { from, to, limit } = req.query;
 
-    from = from ? new Date(from) : new Date(0);
-    to = to ? new Date(to) : new Date();
-    limit = limit ? parseInt(limit) : user.log.length;
-
+    const fromDate = from ? new Date(from) : new Date(0);
+    const toDate = to ? new Date(to) : new Date();
     const log = user.log.filter((exercise) => {
       const exerciseDate = new Date(exercise.date);
-      return exerciseDate >= from && exerciseDate <= to;
+      return exerciseDate >= fromDate && exerciseDate <= toDate;
     });
 
     res.json({
       username: user.username,
       count: log.length,
-      log: log.slice(0, limit).map((exercise) => ({
+      log: log.map((exercise) => ({
         description: exercise.description,
         duration: exercise.duration,
         date: exercise.date.toDateString(),
       })),
     });
   } catch (error) {
+    console.error(error);
     res.status(500).json({ error: "Internal Server Error" });
   }
 });
