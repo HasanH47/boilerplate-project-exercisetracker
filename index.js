@@ -1,196 +1,167 @@
 const express = require("express");
 const app = express();
 const bodyParser = require("body-parser");
-
 const cors = require("cors");
+const mongoose = require("mongoose");
 require("dotenv").config();
 
-const mongoose = require("mongoose");
+app.use(cors());
+app.use(bodyParser.urlencoded({ extended: false }));
+app.use(bodyParser.json());
+
 mongoose.connect(process.env.MONGODB_URI, {
   useNewUrlParser: true,
   useUnifiedTopology: true,
 });
 
-app.use(cors());
-
-app.use(bodyParser.urlencoded({ extended: false }));
-app.use(bodyParser.json());
-
-app.use("/public", express.static(process.cwd() + "/public"));
-
-app.get("/", (req, res) => {
-  res.sendFile(__dirname + "/views/index.html");
-});
-
-var Schema = mongoose.Schema;
-
-var exerciseUsersSchema = new Schema({
+const exerciseUsersSchema = new mongoose.Schema({
   username: { type: String, unique: true, required: true },
 });
 
-var ExerciseUsers = mongoose.model("ExerciseUsers", exerciseUsersSchema);
+const ExerciseUsers = mongoose.model("ExerciseUsers", exerciseUsersSchema);
 
-var exercisesSchema = new Schema({
+const exercisesSchema = new mongoose.Schema({
   userId: { type: String, required: true },
   description: { type: String, required: true },
   duration: { type: Number, min: 1, required: true },
   date: { type: Date, default: Date.now },
 });
 
-var Exercises = mongoose.model("Exercises", exercisesSchema);
+const Exercises = mongoose.model("Exercises", exercisesSchema);
 
-app.post("/api/users", function (req, res) {
-  if (req.body.username === "") {
-    return res.json({ error: "username is required" });
-  }
+app.get("/", (req, res) => {
+  res.sendFile(__dirname + "/views/index.html");
+});
 
-  let username = req.body.username;
-  let _id = "";
+app.post("/api/users", async (req, res) => {
+  try {
+    const { username } = req.body;
+    if (!username) {
+      return res.json({ error: "username is required" });
+    }
 
-  ExerciseUsers.findOne({ username: username }, function (err, data) {
-    if (!err && data === null) {
-      let newUser = new ExerciseUsers({
-        username: username,
-      });
-
-      newUser.save(function (err, data) {
-        if (!err) {
-          _id = data["_id"];
-
-          return res.json({
-            _id: _id,
-            username: username,
-          });
-        }
-      });
-    } else {
+    const existingUser = await ExerciseUsers.findOne({ username });
+    if (existingUser) {
       return res.json({ error: "username already exists" });
     }
-  });
+
+    const newUser = new ExerciseUsers({ username });
+    const savedUser = await newUser.save();
+
+    res.json({
+      _id: savedUser._id,
+      username: savedUser.username,
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
 });
 
-app.get("/api/users", function (req, res) {
-  ExerciseUsers.find({}, function (err, data) {
-    if (!err) {
-      return res.json(data);
+app.get("/api/users", async (req, res) => {
+  try {
+    const users = await ExerciseUsers.find({}, "_id username");
+    res.json(users);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+app.post("/api/users/:_id/exercises", async (req, res) => {
+  try {
+    const { _id } = req.params;
+    const { description, duration, date } = req.body;
+
+    if (!_id) {
+      return res.json({ error: "_id is required" });
     }
-  });
-});
 
-app.post("/api/users/:_id/exercises", function (req, res) {
-  if (req.params._id === "0") {
-    return res.json({ error: "_id is required" });
-  }
+    if (!description) {
+      return res.json({ error: "description is required" });
+    }
 
-  if (req.body.description === "") {
-    return res.json({ error: "description is required" });
-  }
+    if (!duration) {
+      return res.json({ error: "duration is required" });
+    }
 
-  if (req.body.duration === "") {
-    return res.json({ error: "duration is required" });
-  }
+    const userId = _id;
+    const exerciseDate = date ? new Date(date) : new Date();
 
-  let userId = req.params._id;
-  let description = req.body.description;
-  let duration = parseInt(req.body.duration);
-  let date = req.body.date !== undefined ? new Date(req.body.date) : new Date();
+    if (isNaN(duration)) {
+      return res.json({ error: "duration is not a number" });
+    }
 
-  if (isNaN(duration)) {
-    return res.json({ error: "duration is not a number" });
-  }
+    if (isNaN(exerciseDate.getTime())) {
+      return res.json({ error: "date is invalid" });
+    }
 
-  if (date == "Invalid Date") {
-    return res.json({ error: "date is invalid" });
-  }
-
-  ExerciseUsers.findById(userId, function (err, data) {
-    if (!err && data !== null) {
-      let newExercise = new Exercises({
-        userId: userId,
-        description: description,
-        duration: duration,
-        date: date,
-      });
-
-      newExercise.save(function (err2, data2) {
-        if (!err2) {
-          return res.json({
-            _id: data["_id"],
-            username: data["username"],
-            description: data2["description"],
-            duration: data2["duration"],
-            date: new Date(data2["date"]).toDateString(),
-          });
-        }
-      });
-    } else {
+    const user = await ExerciseUsers.findById(userId);
+    if (!user) {
       return res.json({ error: "user not found" });
     }
-  });
+
+    const newExercise = new Exercises({
+      userId,
+      description,
+      duration,
+      date: exerciseDate,
+    });
+
+    const savedExercise = await newExercise.save();
+
+    res.json({
+      _id: user._id,
+      username: user.username,
+      description: savedExercise.description,
+      duration: savedExercise.duration,
+      date: new Date(savedExercise.date).toDateString(),
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
 });
 
-app.get("/api/users/:_id/exercises", function (req, res) {
-  res.redirect("/api/users/" + req.params._id + "/logs");
+app.get("/api/users/:_id/exercises", (req, res) => {
+  res.redirect(`/api/users/${req.params._id}/logs`);
 });
 
-app.get("/api/users/:_id/logs", function (req, res) {
-  let userId = req.params._id;
-  let findConditions = { userId: userId };
-
-  if (
-    (req.query.from !== undefined && req.query.from !== "") ||
-    (req.query.to !== undefined && req.query.to !== "")
-  ) {
-    findConditions.date = {};
-
-    if (req.query.from !== undefined && req.query.from !== "") {
-      findConditions.date.$gte = new Date(req.query.from);
-    }
-
-    if (findConditions.date.$gte == "Invalid Date") {
-      return res.json({ error: "from date is invalid" });
-    }
-
-    if (req.query.to !== undefined && req.query.to !== "") {
-      findConditions.date.$lte = new Date(req.query.to);
-    }
-
-    if (findConditions.date.$lte == "Invalid Date") {
-      return res.json({ error: "to date is invalid" });
-    }
-  }
-
-  let limit = req.query.limit !== undefined ? parseInt(req.query.limit) : 0;
-
-  if (isNaN(limit)) {
-    return res.json({ error: "limit is not a number" });
-  }
-
-  ExerciseUsers.findById(userId, function (err, data) {
-    if (!err && data !== null) {
-      Exercises.find(findConditions)
-        .sort({ date: "asc" })
-        .limit(limit)
-        .exec(function (err2, data2) {
-          if (!err2) {
-            return res.json({
-              _id: data["_id"],
-              username: data["username"],
-              log: data2.map(function (e) {
-                return {
-                  description: e.description,
-                  duration: e.duration,
-                  date: new Date(e.date).toDateString(),
-                };
-              }),
-              count: data2.length,
-            });
-          }
-        });
-    } else {
+app.get("/api/users/:_id/logs", async (req, res) => {
+  try {
+    const { _id } = req.params;
+    const user = await ExerciseUsers.findById(_id);
+    if (!user) {
       return res.json({ error: "user not found" });
     }
-  });
+
+    const { from, to, limit } = req.query;
+    const fromDate = from ? new Date(from) : new Date(0);
+    const toDate = to ? new Date(to) : new Date();
+
+    let findConditions = {
+      userId: _id,
+      date: { $gte: fromDate, $lte: toDate },
+    };
+
+    const exercises = await Exercises.find(findConditions)
+      .sort({ date: "asc" })
+      .limit(limit ? parseInt(limit) : 0);
+
+    res.json({
+      _id: user._id,
+      username: user.username,
+      count: exercises.length,
+      log: exercises.map((exercise) => ({
+        description: exercise.description,
+        duration: exercise.duration,
+        date: new Date(exercise.date).toDateString(),
+      })),
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
 });
 
 // Not found middleware
