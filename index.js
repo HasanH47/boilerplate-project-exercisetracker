@@ -1,127 +1,221 @@
 const express = require("express");
-const mongoose = require("mongoose");
-const cors = require("cors");
-require("dotenv").config();
-
 const app = express();
-const port = process.env.PORT || 3000;
+const bodyParser = require("body-parser");
 
-// Middleware
-app.use(cors());
-app.use(express.json());
+const cors = require("cors");
 
-// Connect to MongoDB
-mongoose.connect(process.env.MONGODB_URI, {
+const mongoose = require("mongoose");
+mongoose.connect(process.env.MONGO_URI, {
   useNewUrlParser: true,
   useUnifiedTopology: true,
 });
-const db = mongoose.connection;
 
-db.on("error", (error) => console.error("MongoDB connection error:", error));
-db.once("open", () => console.log("Connected to MongoDB"));
+app.use(cors());
 
-// Schema for Exercise
-const exerciseSchema = new mongoose.Schema({
-  description: String,
-  duration: Number,
-  date: Date,
-});
+app.use(bodyParser.urlencoded({ extended: false }));
+app.use(bodyParser.json());
 
-// Schema for User
-const userSchema = new mongoose.Schema({
-  username: String,
-  log: [exerciseSchema],
-});
+app.use("/public", express.static(process.cwd() + "/public"));
 
-const User = mongoose.model("User", userSchema);
-
-app.use(express.static("public"));
-
-app.get("/", function (req, res) {
+app.get("/", (req, res) => {
   res.sendFile(__dirname + "/views/index.html");
 });
 
-// Routes
-app.post("/api/users", async (req, res) => {
-  try {
-    const { username } = req.body;
-    const user = new User({ username });
-    const savedUser = await user.save();
-    res.json(savedUser);
-  } catch (error) {
-    res.status(400).json({ error: "Error creating user" });
-  }
+var Schema = mongoose.Schema;
+
+var exerciseUsersSchema = new Schema({
+  username: { type: String, unique: true, required: true },
 });
 
-app.get("/api/users", async (req, res) => {
-  try {
-    const users = await User.find({}, "_id username");
-    res.json(users);
-  } catch (error) {
-    res.status(500).json({ error: "Internal Server Error" });
-  }
+var ExerciseUsers = mongoose.model("ExerciseUsers", exerciseUsersSchema);
+
+var exercisesSchema = new Schema({
+  userId: { type: String, required: true },
+  description: { type: String, required: true },
+  duration: { type: Number, min: 1, required: true },
+  date: { type: Date, default: Date.now },
 });
 
-app.post("/api/users/:_id/exercises", async (req, res) => {
-  try {
-    const { _id } = req.params;
-    const { description, duration, date } = req.body;
+var Exercises = mongoose.model("Exercises", exercisesSchema);
 
-    const user = await User.findById(_id);
-    if (!user) return res.status(404).json({ error: "User not found" });
-
-    const exercise = {
-      description,
-      duration,
-      date: date ? new Date(date) : new Date(),
-    };
-
-    user.log.push(exercise);
-    await user.save();
-
-    res.json({
-      username: user.username,
-      description: exercise.description,
-      duration: exercise.duration,
-      date: exercise.date.toDateString(),
-    });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: "Internal Server Error" });
+app.post("/api/users", function (req, res) {
+  if (req.body.username === "") {
+    return res.json({ error: "username is required" });
   }
+
+  let username = req.body.username;
+  let _id = "";
+
+  ExerciseUsers.findOne({ username: username }, function (err, data) {
+    if (!err && data === null) {
+      let newUser = new ExerciseUsers({
+        username: username,
+      });
+
+      newUser.save(function (err, data) {
+        if (!err) {
+          _id = data["_id"];
+
+          return res.json({
+            _id: _id,
+            username: username,
+          });
+        }
+      });
+    } else {
+      return res.json({ error: "username already exists" });
+    }
+  });
 });
 
-app.get("/api/users/:_id/logs", async (req, res) => {
-  try {
-    const { _id } = req.params;
-    const user = await User.findById(_id);
-    if (!user) return res.status(404).json({ error: "User not found" });
-
-    const { from, to, limit } = req.query;
-
-    const fromDate = from ? new Date(from) : new Date(0);
-    const toDate = to ? new Date(to) : new Date();
-    const log = user.log.filter((exercise) => {
-      const exerciseDate = new Date(exercise.date);
-      return exerciseDate >= fromDate && exerciseDate <= toDate;
-    });
-
-    res.json({
-      username: user.username,
-      count: log.length,
-      log: log.map((exercise) => ({
-        description: exercise.description,
-        duration: exercise.duration,
-        date: exercise.date.toDateString(),
-      })),
-    });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: "Internal Server Error" });
-  }
+app.get("/api/users", function (req, res) {
+  ExerciseUsers.find({}, function (err, data) {
+    if (!err) {
+      return res.json(data);
+    }
+  });
 });
 
-// Server listening
-app.listen(port, () => {
-  console.log(`Server is running on port ${port}`);
+app.post("/api/users/:_id/exercises", function (req, res) {
+  if (req.params._id === "0") {
+    return res.json({ error: "_id is required" });
+  }
+
+  if (req.body.description === "") {
+    return res.json({ error: "description is required" });
+  }
+
+  if (req.body.duration === "") {
+    return res.json({ error: "duration is required" });
+  }
+
+  let userId = req.params._id;
+  let description = req.body.description;
+  let duration = parseInt(req.body.duration);
+  let date = req.body.date !== undefined ? new Date(req.body.date) : new Date();
+
+  if (isNaN(duration)) {
+    return res.json({ error: "duration is not a number" });
+  }
+
+  if (date == "Invalid Date") {
+    return res.json({ error: "date is invalid" });
+  }
+
+  ExerciseUsers.findById(userId, function (err, data) {
+    if (!err && data !== null) {
+      let newExercise = new Exercises({
+        userId: userId,
+        description: description,
+        duration: duration,
+        date: date,
+      });
+
+      newExercise.save(function (err2, data2) {
+        if (!err2) {
+          return res.json({
+            _id: data["_id"],
+            username: data["username"],
+            description: data2["description"],
+            duration: data2["duration"],
+            date: new Date(data2["date"]).toDateString(),
+          });
+        }
+      });
+    } else {
+      return res.json({ error: "user not found" });
+    }
+  });
+});
+
+app.get("/api/users/:_id/exercises", function (req, res) {
+  res.redirect("/api/users/" + req.params._id + "/logs");
+});
+
+app.get("/api/users/:_id/logs", function (req, res) {
+  let userId = req.params._id;
+  let findConditions = { userId: userId };
+
+  if (
+    (req.query.from !== undefined && req.query.from !== "") ||
+    (req.query.to !== undefined && req.query.to !== "")
+  ) {
+    findConditions.date = {};
+
+    if (req.query.from !== undefined && req.query.from !== "") {
+      findConditions.date.$gte = new Date(req.query.from);
+    }
+
+    if (findConditions.date.$gte == "Invalid Date") {
+      return res.json({ error: "from date is invalid" });
+    }
+
+    if (req.query.to !== undefined && req.query.to !== "") {
+      findConditions.date.$lte = new Date(req.query.to);
+    }
+
+    if (findConditions.date.$lte == "Invalid Date") {
+      return res.json({ error: "to date is invalid" });
+    }
+  }
+
+  let limit = req.query.limit !== undefined ? parseInt(req.query.limit) : 0;
+
+  if (isNaN(limit)) {
+    return res.json({ error: "limit is not a number" });
+  }
+
+  ExerciseUsers.findById(userId, function (err, data) {
+    if (!err && data !== null) {
+      Exercises.find(findConditions)
+        .sort({ date: "asc" })
+        .limit(limit)
+        .exec(function (err2, data2) {
+          if (!err2) {
+            return res.json({
+              _id: data["_id"],
+              username: data["username"],
+              log: data2.map(function (e) {
+                return {
+                  description: e.description,
+                  duration: e.duration,
+                  date: new Date(e.date).toDateString(),
+                };
+              }),
+              count: data2.length,
+            });
+          }
+        });
+    } else {
+      return res.json({ error: "user not found" });
+    }
+  });
+});
+
+// Not found middleware
+app.use((req, res, next) => {
+  return next({ status: 404, message: "not found" });
+});
+
+// Error handling middleware
+app.use((err, req, res, next) => {
+  let errCode, errMessage;
+
+  if (err.errors) {
+    // mongoose validation error
+    errCode = 400; // bad request
+    const keys = Object.keys(err.errors);
+    // report the first validation error
+    errMessage = err.errors[keys[0]].message;
+  } else {
+    // generic or custom error
+    errCode = err.status || 500;
+    errMessage = err.message || "Internal Server Error";
+  }
+
+  res.status(errCode).type("txt").send(errMessage);
+});
+
+const listener = app.listen(process.env.PORT || 3000, () => {
+  console.log("Your app is listening on port " + listener.address().port);
 });
