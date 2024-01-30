@@ -131,22 +131,34 @@ app.get("/api/users/:_id/logs", async (req, res) => {
   try {
     const { _id } = req.params;
     const user = await ExerciseUsers.findById(_id);
+
     if (!user) {
       return res.json({ error: "user not found" });
     }
 
     const { from, to, limit } = req.query;
-    const fromDate = from ? new Date(from) : new Date(0);
-    const toDate = to ? new Date(to) : new Date();
 
-    let findConditions = {
-      userId: _id,
-      date: { $gte: fromDate, $lte: toDate },
-    };
+    let findConditions = { userId: _id };
 
-    const exercises = await Exercises.find(findConditions)
-      .sort({ date: "asc" })
-      .limit(limit ? parseInt(limit) : 0);
+    if (from || to) {
+      findConditions.date = {};
+
+      if (from) {
+        findConditions.date.$gte = new Date(from);
+      }
+
+      if (to) {
+        findConditions.date.$lte = new Date(to);
+      }
+    }
+
+    const exercisesQuery = Exercises.find(findConditions).sort({ date: "asc" });
+
+    if (limit) {
+      exercisesQuery.limit(parseInt(limit));
+    }
+
+    const exercises = await exercisesQuery.exec();
 
     res.json({
       _id: user._id,
