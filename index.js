@@ -30,6 +30,11 @@ app.use("/api", userRoutes);
 // Serve static files
 app.use(express.static("public"));
 
+// Handle root path
+app.get("/", (req, res) => {
+  res.sendFile(__dirname + "/views/index.html");
+});
+
 // Server listening
 app.listen(port, () => {
   console.log(`Server is running on port ${port}`);
