@@ -1,200 +1,127 @@
 const express = require("express");
-const app = express();
-const bodyParser = require("body-parser");
-const cors = require("cors");
 const mongoose = require("mongoose");
+const cors = require("cors");
+require("dotenv").config();
 
-mongoose.connect(process.env.MONGO_URI, {
+const app = express();
+const port = process.env.PORT || 3000;
+
+// Middleware
+app.use(cors());
+app.use(express.json());
+
+// Connect to MongoDB
+mongoose.connect(process.env.MONGODB_URI, {
   useNewUrlParser: true,
   useUnifiedTopology: true,
 });
+const db = mongoose.connection;
 
-app.use(cors());
-app.use(bodyParser.urlencoded({ extended: false }));
-app.use(bodyParser.json());
+db.on("error", (error) => console.error("MongoDB connection error:", error));
+db.once("open", () => console.log("Connected to MongoDB"));
 
-app.use("/public", express.static(process.cwd() + "/public"));
+// Schema for Exercise
+const exerciseSchema = new mongoose.Schema({
+  description: String,
+  duration: Number,
+  date: Date,
+});
 
-app.get("/", (req, res) => {
+// Schema for User
+const userSchema = new mongoose.Schema({
+  username: String,
+  log: [exerciseSchema],
+});
+
+const User = mongoose.model("User", userSchema);
+
+app.use(express.static("public"));
+
+app.get("/", function (req, res) {
   res.sendFile(__dirname + "/views/index.html");
 });
 
-var Schema = mongoose.Schema;
-
-var exerciseUsersSchema = new Schema({
-  username: { type: String, unique: true, required: true },
-});
-
-var ExerciseUsers = mongoose.model("ExerciseUsers", exerciseUsersSchema);
-
-var exercisesSchema = new Schema({
-  userId: { type: String, required: true },
-  description: { type: String, required: true },
-  duration: { type: Number, min: 1, required: true },
-  date: { type: Date, default: Date.now },
-});
-
-var Exercises = mongoose.model("Exercises", exercisesSchema);
-
-// POST new user
+// Routes
 app.post("/api/users", async (req, res) => {
   try {
     const { username } = req.body;
-    if (!username) {
-      return res.json({ error: "username is required" });
-    }
-
-    const existingUser = await ExerciseUsers.findOne({ username });
-    if (existingUser) {
-      return res.json({ error: "username already exists" });
-    }
-
-    const newUser = new ExerciseUsers({
-      username: username,
-    });
-
-    const savedUser = await newUser.save();
-
-    return res.json({
-      _id: savedUser._id,
-      username: savedUser.username,
-    });
+    const user = new User({ username });
+    const savedUser = await user.save();
+    res.json(savedUser);
   } catch (error) {
-    console.error(error);
-    return res.status(500).json({ error: "Internal Server Error" });
+    res.status(400).json({ error: "Error creating user" });
   }
 });
 
-// GET all users
 app.get("/api/users", async (req, res) => {
   try {
-    const users = await ExerciseUsers.find();
-    return res.json(users);
+    const users = await User.find({}, "_id username");
+    res.json(users);
   } catch (error) {
-    console.error(error);
-    return res.status(500).json({ error: "Internal Server Error" });
+    res.status(500).json({ error: "Internal Server Error" });
   }
 });
 
-// POST exercise for a user
 app.post("/api/users/:_id/exercises", async (req, res) => {
   try {
-    const userId = req.params._id;
-    if (userId === "0") {
-      return res.json({ error: "_id is required" });
-    }
-
-    const user = await ExerciseUsers.findById(userId);
-    if (!user) {
-      return res.json({ error: "user not found" });
-    }
-
+    const { _id } = req.params;
     const { description, duration, date } = req.body;
 
-    if (!description || !duration) {
-      return res.json({ error: "description and duration are required" });
-    }
+    const user = await User.findById(_id);
+    if (!user) return res.status(404).json({ error: "User not found" });
 
-    const newExercise = new Exercises({
-      userId,
+    const exercise = {
       description,
-      duration: parseInt(duration),
+      duration,
       date: date ? new Date(date) : new Date(),
-    });
+    };
 
-    const savedExercise = await newExercise.save();
+    user.log.push(exercise);
+    await user.save();
 
-    return res.json({
-      _id: user._id,
+    res.json({
       username: user.username,
-      description: savedExercise.description,
-      duration: savedExercise.duration,
-      date: new Date(savedExercise.date).toDateString(),
+      description: exercise.description,
+      duration: exercise.duration,
+      date: exercise.date.toDateString(),
     });
   } catch (error) {
     console.error(error);
-    return res.status(500).json({ error: "Internal Server Error" });
+    res.status(500).json({ error: "Internal Server Error" });
   }
 });
 
-// GET user's exercise log
 app.get("/api/users/:_id/logs", async (req, res) => {
   try {
-    const userId = req.params._id;
-    const user = await ExerciseUsers.findById(userId);
-
-    if (!user) {
-      return res.json({ error: "user not found" });
-    }
+    const { _id } = req.params;
+    const user = await User.findById(_id);
+    if (!user) return res.status(404).json({ error: "User not found" });
 
     const { from, to, limit } = req.query;
-    const findConditions = { userId };
 
-    if (from || to) {
-      findConditions.date = {};
+    const fromDate = from ? new Date(from) : new Date(0);
+    const toDate = to ? new Date(to) : new Date();
+    const log = user.log.filter((exercise) => {
+      const exerciseDate = new Date(exercise.date);
+      return exerciseDate >= fromDate && exerciseDate <= toDate;
+    });
 
-      if (from) {
-        findConditions.date.$gte = new Date(from);
-      }
-
-      if (to) {
-        findConditions.date.$lte = new Date(to);
-      }
-    }
-
-    let logQuery = Exercises.find(findConditions).sort({ date: "asc" });
-
-    if (limit) {
-      const parsedLimit = parseInt(limit);
-      if (!isNaN(parsedLimit)) {
-        logQuery = logQuery.limit(parsedLimit);
-      } else {
-        return res.json({ error: "limit is not a number" });
-      }
-    }
-
-    const log = await logQuery.exec();
-
-    return res.json({
-      _id: user._id,
+    res.json({
       username: user.username,
+      count: log.length,
       log: log.map((exercise) => ({
         description: exercise.description,
         duration: exercise.duration,
-        date: new Date(exercise.date).toDateString(),
+        date: exercise.date.toDateString(),
       })),
-      count: log.length,
     });
   } catch (error) {
     console.error(error);
-    return res.status(500).json({ error: "Internal Server Error" });
+    res.status(500).json({ error: "Internal Server Error" });
   }
 });
 
-// Not found middleware
-app.use((req, res, next) => {
-  return next({ status: 404, message: "not found" });
-});
-
-// Error handling middleware
-app.use((err, req, res, next) => {
-  let errCode, errMessage;
-
-  if (err.errors) {
-    // mongoose validation error
-    errCode = 400; // bad request
-    const keys = Object.keys(err.errors);
-    // report the first validation error
-    errMessage = err.errors[keys[0]].message;
-  } else {
-    // generic or custom error
-    errCode = err.status || 500;
-    errMessage = err.message || "Internal Server Error";
-  }
-
-  res.status(errCode).type("txt").send(errMessage);
-});
-
-const listener = app.listen(process.env.PORT || 3000, () => {
-  console.log("Your app is listening on port " + listener.address().port);
+// Server listening
+app.listen(port, () => {
+  console.log(`Server is running on port ${port}`);
 });
