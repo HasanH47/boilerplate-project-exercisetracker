@@ -129,47 +129,30 @@ app.get("/api/users/:_id/exercises", (req, res) => {
 
 app.get("/api/users/:_id/logs", async (req, res) => {
   try {
-    const { _id } = req.params;
-    const user = await ExerciseUsers.findById(_id);
+    const { from, to, limit } = req.query;
+    console.log(from, to, limit);
+
+    const user = await ExerciseUsers.findById(req.params._id).exec();
 
     if (!user) {
-      return res.json({ error: "user not found" });
+      return res.json({ error: "User not found" });
     }
 
-    const { from, to, limit } = req.query;
-
-    let findConditions = { userId: _id };
-
-    if (from || to) {
-      findConditions.date = {};
-
-      if (from) {
-        findConditions.date.$gte = new Date(from);
-      }
-
-      if (to) {
-        findConditions.date.$lte = new Date(to);
-      }
+    if (user.log && (from || to || limit)) {
+      const logs = user.log;
+      const filteredLogs = logs.filter((log) => {
+        const formattedLogDate = new Date(log.date).toISOString().split("T")[0];
+        console.log(formattedLogDate);
+        console.log(from);
+        return formattedLogDate >= from && formattedLogDate <= to;
+      });
+      const slicedLogs = limit ? filteredLogs.slice(0, limit) : filteredLogs;
+      user.log = slicedLogs;
+      user.count = slicedLogs.length;
     }
 
-    const exercisesQuery = Exercises.find(findConditions).sort({ date: "asc" });
-
-    if (limit) {
-      exercisesQuery.limit(parseInt(limit));
-    }
-
-    const exercises = await exercisesQuery.exec();
-
-    res.json({
-      _id: user._id,
-      username: user.username,
-      count: exercises.length,
-      log: exercises.map((exercise) => ({
-        description: exercise.description,
-        duration: exercise.duration,
-        date: new Date(exercise.date).toDateString(),
-      })),
-    });
+    console.log(user);
+    res.json(user);
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: "Internal Server Error" });
