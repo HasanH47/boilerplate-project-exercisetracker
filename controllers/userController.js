@@ -9,6 +9,7 @@ exports.createUser = async (req, res) => {
     const savedUser = await user.save();
     res.json(savedUser);
   } catch (error) {
+    console.error("Error creating user:", error);
     res.status(400).json({ error: "Error creating user" });
   }
 };
