@@ -1,3 +1,4 @@
+// app.js
 const express = require("express");
 const mongoose = require("mongoose");
 const cors = require("cors");
@@ -5,6 +6,9 @@ require("dotenv").config();
 
 const app = express();
 const port = process.env.PORT || 3000;
+
+// Import routes
+const userRoutes = require("./routes/userRoutes");
 
 // Middleware
 app.use(cors());
@@ -20,112 +24,11 @@ const db = mongoose.connection;
 db.on("error", (error) => console.error("MongoDB connection error:", error));
 db.once("open", () => console.log("Connected to MongoDB"));
 
-// Schema for Exercise
-const exerciseSchema = new mongoose.Schema({
-  description: String,
-  duration: Number,
-  date: Date,
-});
+// Use routes
+app.use("/api", userRoutes);
 
-// Schema for User
-const userSchema = new mongoose.Schema({
-  username: String,
-  log: [exerciseSchema],
-});
-
-const User = mongoose.model("User", userSchema);
-
+// Serve static files
 app.use(express.static("public"));
-
-app.get("/", function (req, res) {
-  res.sendFile(__dirname + "/views/index.html");
-});
-
-// Routes
-app.post("/api/users", async (req, res) => {
-  try {
-    const { username } = req.body;
-    const user = new User({ username });
-    const savedUser = await user.save();
-    res.json(savedUser);
-  } catch (error) {
-    res.status(400).json({ error: "Error creating user" });
-  }
-});
-
-app.get("/api/users", async (req, res) => {
-  try {
-    const users = await User.find({}, "_id username");
-    res.json(users);
-  } catch (error) {
-    res.status(500).json({ error: "Internal Server Error" });
-  }
-});
-
-app.post("/api/users/:_id/exercises", async (req, res) => {
-  try {
-    const { _id } = req.params;
-    const { description, duration, date } = req.body;
-
-    const user = await User.findById(_id);
-    if (!user) return res.status(404).json({ error: "User not found" });
-
-    const exercise = {
-      description,
-      duration,
-      date: date ? new Date(date) : new Date(),
-    };
-
-    user.log.push(exercise);
-    await user.save();
-
-    res.json({
-      username: user.username,
-      _id: user._id,
-      description: exercise.description,
-      duration: exercise.duration,
-      date: exercise.date.toDateString(),
-    });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: "Internal Server Error" });
-  }
-});
-
-app.get("/api/users/:_id/logs", async (req, res) => {
-  try {
-    const { _id } = req.params;
-    const user = await User.findById(_id);
-    if (!user) return res.status(404).json({ error: "User not found" });
-
-    const { from, to, limit } = req.query;
-
-    const fromDate = from ? new Date(from) : new Date(0);
-    const toDate = to ? new Date(to) : new Date();
-
-    // Filter the log entries based on the date range
-    const log = user.log.filter((exercise) => {
-      const exerciseDate = new Date(exercise.date);
-      return exerciseDate >= fromDate && exerciseDate <= toDate;
-    });
-
-    // Apply the limit if specified
-    const limitedLog = limit ? log.slice(0, limit) : log;
-
-    res.json({
-      username: user.username,
-      count: limitedLog.length,
-      log: limitedLog.map((exercise) => ({
-        description: exercise.description,
-        duration: exercise.duration,
-        date: exercise.date.toDateString(),
-      })),
-    });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: "Internal Server Error" });
-  }
-});
 
 // Server listening
 app.listen(port, () => {
