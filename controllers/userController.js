@@ -1,16 +1,22 @@
-// controllers/userController.js
+const { validationResult } = require("express-validator");
 const User = require("../models/userModel");
 const Exercise = require("../models/exerciseModel");
 
 exports.createUser = async (req, res) => {
   try {
+    // Validation
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ errors: errors.array() });
+    }
+
     const { username } = req.body;
     const user = new User({ username });
     const savedUser = await user.save();
     res.json(savedUser);
   } catch (error) {
     console.error("Error creating user:", error);
-    res.status(400).json({ error: "Error creating user" });
+    res.status(500).json({ error: "Internal Server Error" });
   }
 };
 
@@ -19,12 +25,19 @@ exports.getUsers = async (req, res) => {
     const users = await User.find({}, "_id username");
     res.json(users);
   } catch (error) {
+    console.error(error);
     res.status(500).json({ error: "Internal Server Error" });
   }
 };
 
 exports.addExercise = async (req, res) => {
   try {
+    // Validation
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ errors: errors.array() });
+    }
+
     const { userId } = req.params;
     const { description, duration, date } = req.body;
 
@@ -55,6 +68,12 @@ exports.addExercise = async (req, res) => {
 
 exports.getExerciseLog = async (req, res) => {
   try {
+    // Validation
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ errors: errors.array() });
+    }
+
     const { userId } = req.params;
     const user = await User.findById(userId);
     if (!user) return res.status(404).json({ error: "User not found" });
@@ -89,4 +108,21 @@ exports.getExerciseLog = async (req, res) => {
   }
 };
 
-// You can add other functions as needed...
+// Validation rules for createUser and addExercise routes
+exports.validateUser = [
+  check("username").notEmpty().withMessage("Username is required"),
+];
+
+exports.validateExercise = [
+  check("description").notEmpty().withMessage("Description is required"),
+  check("duration")
+    .notEmpty()
+    .withMessage("Duration is required")
+    .isNumeric()
+    .withMessage("Duration must be a number"),
+  check("date")
+    .optional({ nullable: true })
+    .isISO8601()
+    .toDate()
+    .withMessage("Invalid date format"),
+];
